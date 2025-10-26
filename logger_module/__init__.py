@@ -18,10 +18,14 @@ from logger_module.core.log_entry import LogEntry
 from logger_module.core.log_level import LogLevel
 from logger_module.core.logger_config import LoggerConfig
 
+# Import filters submodule (not all filter classes by default)
+from logger_module import filters
+
 __all__ = [
     "Logger",
     "LoggerBuilder",
     "LogEntry",
     "LogLevel",
     "LoggerConfig",
+    "filters",
 ]

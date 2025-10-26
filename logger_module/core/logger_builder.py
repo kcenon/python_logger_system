@@ -20,6 +20,7 @@ class LoggerBuilder:
         self._file_path: Optional[Path] = None
         self._rotating_file = False
         self._custom_writers = []
+        self._custom_filters = []
 
     def with_name(self, name: str) -> "LoggerBuilder":
         """Set logger name."""
@@ -58,14 +59,35 @@ class LoggerBuilder:
         self._config.batch_size = size
         return self
 
+    def with_filter(self, log_filter) -> "LoggerBuilder":
+        """
+        Add a log filter.
+
+        Args:
+            log_filter: Filter instance (BaseFilter subclass)
+
+        Returns:
+            Self for method chaining
+
+        Example:
+            from logger_module.filters import LevelFilter, PatternFilter
+
+            logger = (LoggerBuilder()
+                .with_filter(LevelFilter(min_level=LogLevel.WARN))
+                .with_filter(PatternFilter(r"error", exclude=False))
+                .build())
+        """
+        self._custom_filters.append(log_filter)
+        return self
+
     def build(self) -> Logger:
         """Build and return configured logger."""
         logger = Logger(self._config)
-        
+
         # Add console writer
         if self._console_enabled:
             logger.add_writer(ConsoleWriter(colored=self._config.colored_output))
-        
+
         # Add file writer
         if self._file_path:
             if self._rotating_file:
@@ -77,9 +99,13 @@ class LoggerBuilder:
             else:
                 writer = FileWriter(str(self._file_path))
             logger.add_writer(writer)
-        
+
         # Add custom writers
         for writer in self._custom_writers:
             logger.add_writer(writer)
-        
+
+        # Add custom filters
+        for log_filter in self._custom_filters:
+            logger.add_filter(log_filter)
+
         return logger

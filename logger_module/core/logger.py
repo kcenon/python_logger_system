@@ -90,6 +90,15 @@ class Logger:
         """Add a log writer."""
         self._writers.append(writer)
 
+    def add_filter(self, log_filter: Any) -> None:
+        """
+        Add a log filter.
+
+        Args:
+            log_filter: Filter instance with should_log(entry) method
+        """
+        self._filters.append(log_filter)
+
     def log(self, level: LogLevel, message: str, **kwargs) -> None:
         """Log a message."""
         if level < self._config.min_level:
