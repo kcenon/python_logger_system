@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import os
+from typing import Optional
 from logger_module.core.log_entry import LogEntry
 
 
@@ -13,12 +14,24 @@ class RotatingFileWriter:
         filepath: str,
         max_bytes: int = 10 * 1024 * 1024,
         backup_count: int = 5,
-        encoding: str = "utf-8"
+        encoding: str = "utf-8",
+        formatter=None
     ):
+        """
+        Initialize rotating file writer.
+
+        Args:
+            filepath: Path to log file
+            max_bytes: Maximum file size before rotation
+            backup_count: Number of backup files to keep
+            encoding: File encoding (default: 'utf-8')
+            formatter: Log formatter (default: uses entry's __str__)
+        """
         self.filepath = Path(filepath)
         self.max_bytes = max_bytes
         self.backup_count = backup_count
         self.encoding = encoding
+        self.formatter = formatter
         self._file = None
         self._open()
 
@@ -58,7 +71,11 @@ class RotatingFileWriter:
         if self._should_rotate():
             self._do_rotate()
         if self._file:
-            self._file.write(f"{entry}\n")
+            if self.formatter:
+                msg = self.formatter.format(entry)
+            else:
+                msg = str(entry)
+            self._file.write(msg + "\n")
 
     def flush(self):
         """Flush file buffer."""

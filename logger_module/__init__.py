@@ -18,8 +18,9 @@ from logger_module.core.log_entry import LogEntry
 from logger_module.core.log_level import LogLevel
 from logger_module.core.logger_config import LoggerConfig
 
-# Import filters submodule (not all filter classes by default)
+# Import submodules (not all classes by default)
 from logger_module import filters
+from logger_module import formatters
 
 __all__ = [
     "Logger",
@@ -28,4 +29,5 @@ __all__ = [
     "LogLevel",
     "LoggerConfig",
     "filters",
+    "formatters",
 ]
