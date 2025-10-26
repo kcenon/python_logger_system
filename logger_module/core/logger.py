@@ -26,7 +26,7 @@ class Logger:
         self._running = False
         self._log_queue: Optional[queue.Queue] = None
         self._worker_thread: Optional[threading.Thread] = None
-        self._metrics = {"logged": 0, "dropped": 0}
+        self._metrics = {"logged": 0, "dropped": 0, "processed": 0}
         
         if self._config.async_mode:
             self._start_async_worker()
@@ -48,23 +48,28 @@ class Logger:
         """Process log entries from queue (worker thread)."""
         batch = []
         last_flush = time.time()
-        
+
         while self._running or not self._log_queue.empty():
             try:
                 timeout = self._config.flush_interval_ms / 1000.0
                 entry = self._log_queue.get(timeout=timeout)
-                batch.append(entry)
-                
-                should_flush = (
-                    len(batch) >= self._config.batch_size or
-                    (time.time() - last_flush) >= timeout
-                )
-                
-                if should_flush:
-                    self._write_batch(batch)
-                    batch.clear()
-                    last_flush = time.time()
-                    
+
+                try:
+                    batch.append(entry)
+
+                    should_flush = (
+                        len(batch) >= self._config.batch_size or
+                        (time.time() - last_flush) >= timeout
+                    )
+
+                    if should_flush:
+                        self._write_batch(batch)
+                        batch.clear()
+                        last_flush = time.time()
+                finally:
+                    # Always mark task as done to prevent queue.join() deadlock
+                    self._log_queue.task_done()
+
             except queue.Empty:
                 if batch:
                     self._write_batch(batch)
@@ -79,6 +84,7 @@ class Logger:
                     writer.write(entry)
                 except Exception as e:
                     print(f"Writer error: {e}")
+            self._metrics["processed"] += 1
 
     def add_writer(self, writer: Any) -> None:
         """Add a log writer."""
@@ -140,6 +146,15 @@ class Logger:
         if self._config.async_mode and self._log_queue:
             # Wait for queue to empty
             self._log_queue.join()
+
+            # Wait for all entries to be processed (not just dequeued)
+            max_wait = 1.0  # Maximum 1 second wait
+            start_time = time.time()
+            while (time.time() - start_time) < max_wait:
+                if self._metrics["processed"] >= self._metrics["logged"]:
+                    break
+                time.sleep(0.01)  # 10ms polling interval
+
         for writer in self._writers:
             if hasattr(writer, 'flush'):
                 writer.flush()
