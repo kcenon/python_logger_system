@@ -9,6 +9,7 @@ from logger_module.core.log_level import LogLevel
 from logger_module.writers.console_writer import ConsoleWriter
 from logger_module.writers.file_writer import FileWriter
 from logger_module.writers.rotating_file_writer import RotatingFileWriter
+from logger_module.writers.network_writer import TCPWriter, UDPWriter
 
 if TYPE_CHECKING:
     from logger_module.security.encryption_config import EncryptionConfig
@@ -159,6 +160,78 @@ class LoggerBuilder:
         Returns:
             Self for method chaining
         """
+        self._custom_writers.append(writer)
+        return self
+
+    def with_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float = 5.0,
+        reconnect_attempts: int = 3,
+        use_ssl: bool = False,
+    ) -> "LoggerBuilder":
+        """
+        Add TCP network writer for remote logging.
+
+        TCP provides reliable, ordered delivery with automatic
+        reconnection on connection failures.
+
+        Args:
+            host: Remote host address
+            port: Remote port number
+            timeout: Socket timeout in seconds
+            reconnect_attempts: Maximum reconnection attempts
+            use_ssl: Enable SSL/TLS encryption
+
+        Returns:
+            Self for method chaining
+
+        Example:
+            logger = (LoggerBuilder()
+                .with_tcp("log-server.example.com", 5140)
+                .build())
+        """
+        writer = TCPWriter(
+            host=host,
+            port=port,
+            timeout=timeout,
+            reconnect_attempts=reconnect_attempts,
+            use_ssl=use_ssl,
+        )
+        self._custom_writers.append(writer)
+        return self
+
+    def with_udp(
+        self,
+        host: str,
+        port: int,
+        timeout: float = 5.0,
+    ) -> "LoggerBuilder":
+        """
+        Add UDP network writer for high-throughput logging.
+
+        UDP provides fire-and-forget delivery with low latency.
+        Best for high-volume logging where some loss is acceptable.
+
+        Args:
+            host: Remote host address
+            port: Remote port number
+            timeout: Socket timeout in seconds
+
+        Returns:
+            Self for method chaining
+
+        Example:
+            logger = (LoggerBuilder()
+                .with_udp("syslog.example.com", 514)
+                .build())
+        """
+        writer = UDPWriter(
+            host=host,
+            port=port,
+            timeout=timeout,
+        )
         self._custom_writers.append(writer)
         return self
 
