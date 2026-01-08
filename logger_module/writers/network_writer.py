@@ -584,7 +584,19 @@ class UDPWriter(NetworkWriter):
 
         with self._lock:
             if self._socket is None:
-                self.connect()
+                self._init_socket()
 
             if self._socket and self._send_data(data):
                 self._stats.record_success(len(data))
+
+    def _init_socket(self) -> bool:
+        """Initialize UDP socket (caller must hold lock)."""
+        try:
+            self._socket = self._create_socket()
+            self._socket.settimeout(self.timeout)
+            self._stats.connected_at = datetime.now()
+            self._stats.is_connected = True
+            return True
+        except socket.error as e:
+            self._stats.record_failure(str(e))
+            return False
