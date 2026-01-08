@@ -13,6 +13,8 @@ Python Logger System is a high-performance asynchronous logging framework for Py
 - **Asynchronous Processing**: Non-blocking log operations with queue-based batching
 - **Multiple Writers**: Console, file, rotating file, network (TCP/UDP) support
 - **Log Routing**: Direct log entries to specific writers based on level, pattern, or custom rules
+- **Monitoring & Metrics**: Comprehensive metrics collection with Prometheus/StatsD integration
+- **Health Checks**: Kubernetes-ready liveness and readiness probes
 - **Thread-Safe**: Concurrent logging from multiple threads
 - **Builder Pattern**: Fluent API for logger construction
 - **Colored Output**: ANSI-colored console output
@@ -364,6 +366,102 @@ Supported algorithms:
 - **AES-256-CBC**: Classic block cipher
 - **ChaCha20-Poly1305**: Modern stream cipher
 
+### Monitoring and Metrics
+
+Enable comprehensive monitoring for observability:
+
+```python
+from logger_module import LoggerBuilder
+from logger_module.monitoring import (
+    InMemoryMonitor,
+    HealthChecker,
+    HealthStatus,
+)
+
+# Enable metrics collection
+logger = (LoggerBuilder()
+    .with_name("myapp")
+    .with_console()
+    .with_metrics(True)
+    .build())
+
+# Log messages
+logger.info("Application started")
+logger.error("An error occurred")
+
+# Get detailed metrics
+metrics = logger.get_detailed_metrics()
+print(f"Total messages: {metrics.total_messages}")
+print(f"Messages per second: {metrics.messages_per_second}")
+print(f"Avg latency: {metrics.avg_write_latency_ms}ms")
+
+logger.shutdown()
+```
+
+**With external monitoring (Prometheus):**
+
+```bash
+# Install prometheus-client
+pip install prometheus-client
+```
+
+```python
+from logger_module import LoggerBuilder
+from logger_module.monitoring import PrometheusMonitor
+
+# Create Prometheus monitor
+monitor = PrometheusMonitor(prefix="myapp_logger")
+
+logger = (LoggerBuilder()
+    .with_name("myapp")
+    .with_console()
+    .with_monitoring(monitor, metrics_enabled=True)
+    .build())
+
+# Metrics are automatically exported to Prometheus
+# Available metrics:
+#   myapp_logger_messages_total{level="INFO"}
+#   myapp_logger_queue_depth
+#   myapp_logger_dropped_total
+#   myapp_logger_write_latency_seconds
+
+logger.info("This is tracked")
+logger.shutdown()
+```
+
+**Health Checks (for Kubernetes/containers):**
+
+```python
+from logger_module.monitoring import (
+    HealthChecker,
+    LivenessChecker,
+    ReadinessChecker,
+)
+
+# Comprehensive health check
+health = HealthChecker(logger)
+result = health.check()
+print(f"Status: {result.status.value}")  # healthy/degraded/unhealthy
+print(f"Issues: {result.issues}")
+
+# Kubernetes-style probes
+liveness = LivenessChecker(logger)
+alive, reason = liveness.check()
+
+readiness = ReadinessChecker(logger)
+ready, reason = readiness.check()
+```
+
+**Available metrics:**
+- `total_messages` - Total logged messages
+- `messages_by_level` - Messages per log level
+- `queue_depth` / `queue_max_depth` - Async queue metrics
+- `dropped_messages` - Messages dropped due to full queue
+- `messages_per_second` - Current throughput rate
+- `avg_write_latency_ms` / `max_write_latency_ms` - Write latencies
+- `writer_errors` / `writer_retries` - Error tracking
+- `bytes_written` - Total output size
+
 ## Architecture
 
 ```
@@ -384,6 +482,11 @@ python_logger_system/
 │   │   ├── log_router.py       # Main router
 │   │   ├── route_builder.py    # Fluent route configuration
 │   │   └── route_config.py     # Route configuration
+│   ├── monitoring/
+│   │   ├── metrics.py          # Metrics collection
+│   │   ├── monitor.py          # Monitor interfaces
+│   │   ├── prometheus_monitor.py # Prometheus/StatsD export
+│   │   └── health_checker.py   # Health checks
 │   ├── safety/
 │   │   ├── signal_manager.py   # Signal handlers
 │   │   ├── mmap_buffer.py      # Memory-mapped buffer
