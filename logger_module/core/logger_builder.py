@@ -1,6 +1,6 @@
 """Logger builder pattern"""
 
-from typing import Optional, Set, TYPE_CHECKING
+from typing import Any, Callable, Optional, Set, TYPE_CHECKING
 from pathlib import Path
 
 from logger_module.core.logger import Logger
@@ -13,6 +13,7 @@ from logger_module.writers.network_writer import TCPWriter, UDPWriter
 
 if TYPE_CHECKING:
     from logger_module.security.encryption_config import EncryptionConfig
+    from logger_module.routing.log_router import LogRouter
 
 
 class LoggerBuilder:
@@ -21,15 +22,19 @@ class LoggerBuilder:
     def __init__(self):
         self._config = LoggerConfig()
         self._console_enabled = False
+        self._console_name: Optional[str] = None
         self._file_path: Optional[Path] = None
+        self._file_name: Optional[str] = None
         self._rotating_file = False
-        self._custom_writers = []
+        self._custom_writers: list[tuple[Any, Optional[str]]] = []
         self._custom_filters = []
         self._encryption_config: Optional["EncryptionConfig"] = None
         self._critical_writer_enabled = False
         self._critical_force_flush_levels: Optional[Set[LogLevel]] = None
         self._critical_sync_on_critical = True
         self._wal_path: Optional[str] = None
+        self._router: Optional["LogRouter"] = None
+        self._route_configs: list[Callable[["LogRouter"], None]] = []
 
     def with_name(self, name: str) -> "LoggerBuilder":
         """Set logger name."""
@@ -46,15 +51,45 @@ class LoggerBuilder:
         self._config.async_mode = enabled
         return self
 
-    def with_console(self, colored: bool = True) -> "LoggerBuilder":
-        """Enable console output."""
+    def with_console(
+        self,
+        colored: bool = True,
+        name: Optional[str] = None
+    ) -> "LoggerBuilder":
+        """
+        Enable console output.
+
+        Args:
+            colored: Enable colored output
+            name: Optional name for routing
+
+        Returns:
+            Self for method chaining
+        """
         self._console_enabled = True
+        self._console_name = name
         self._config.colored_output = colored
         return self
 
-    def with_file(self, filepath: str, rotating: bool = False) -> "LoggerBuilder":
-        """Enable file output."""
+    def with_file(
+        self,
+        filepath: str,
+        rotating: bool = False,
+        name: Optional[str] = None
+    ) -> "LoggerBuilder":
+        """
+        Enable file output.
+
+        Args:
+            filepath: Path to log file
+            rotating: Enable log rotation
+            name: Optional name for routing
+
+        Returns:
+            Self for method chaining
+        """
         self._file_path = Path(filepath)
+        self._file_name = name
         self._rotating_file = rotating
         return self
 
@@ -150,17 +185,22 @@ class LoggerBuilder:
         self._encryption_config = config
         return self
 
-    def add_writer(self, writer) -> "LoggerBuilder":
+    def add_writer(
+        self,
+        writer: Any,
+        name: Optional[str] = None
+    ) -> "LoggerBuilder":
         """
         Add a custom writer.
 
         Args:
             writer: Writer instance
+            name: Optional name for routing
 
         Returns:
             Self for method chaining
         """
-        self._custom_writers.append(writer)
+        self._custom_writers.append((writer, name))
         return self
 
     def with_tcp(
@@ -199,7 +239,7 @@ class LoggerBuilder:
             reconnect_attempts=reconnect_attempts,
             use_ssl=use_ssl,
         )
-        self._custom_writers.append(writer)
+        self._custom_writers.append((writer, None))
         return self
 
     def with_udp(
@@ -232,7 +272,80 @@ class LoggerBuilder:
             port=port,
             timeout=timeout,
         )
-        self._custom_writers.append(writer)
+        self._custom_writers.append((writer, None))
+        return self
+
+    def with_routing(
+        self,
+        router: Optional["LogRouter"] = None
+    ) -> "LoggerBuilder":
+        """
+        Enable log routing.
+
+        When routing is enabled, log entries are directed to specific
+        writers based on configurable rules instead of being sent to
+        all writers.
+
+        Args:
+            router: Optional pre-configured LogRouter instance
+
+        Returns:
+            Self for method chaining
+
+        Example:
+            from logger_module.routing import LogRouter
+
+            router = LogRouter()
+            router.set_default_writers("console")
+
+            logger = (LoggerBuilder()
+                .with_console(name="console")
+                .with_file("errors.log", name="errors")
+                .with_routing(router)
+                .build())
+
+            # Configure routes after build
+            logger.get_router().route() \\
+                .when_level(LogLevel.ERROR) \\
+                .route_to("errors", "console") \\
+                .build()
+        """
+        if router is None:
+            from logger_module.routing.log_router import LogRouter
+            router = LogRouter()
+        self._router = router
+        return self
+
+    def with_route(
+        self,
+        config_func: Callable[["LogRouter"], None]
+    ) -> "LoggerBuilder":
+        """
+        Add a route configuration function.
+
+        The function will be called with the router during build.
+
+        Args:
+            config_func: Function that configures routes on the router
+
+        Returns:
+            Self for method chaining
+
+        Example:
+            def configure_routes(router):
+                router.route() \\
+                    .when_level(LogLevel.ERROR) \\
+                    .route_to("errors") \\
+                    .build()
+                router.set_default_writers("console")
+
+            logger = (LoggerBuilder()
+                .with_console(name="console")
+                .with_file("errors.log", name="errors")
+                .with_route(configure_routes)
+                .build())
+        """
+        self._route_configs.append(config_func)
         return self
 
     def with_critical_writer(
@@ -277,9 +390,19 @@ class LoggerBuilder:
         """Build and return configured logger."""
         logger = Logger(self._config)
 
+        # Set up router if routing is enabled
+        if self._router is not None or self._route_configs:
+            if self._router is None:
+                from logger_module.routing.log_router import LogRouter
+                self._router = LogRouter()
+            logger.set_router(self._router)
+
         # Add console writer
         if self._console_enabled:
-            logger.add_writer(ConsoleWriter(colored=self._config.colored_output))
+            logger.add_writer(
+                ConsoleWriter(colored=self._config.colored_output),
+                name=self._console_name
+            )
 
         # Add file writer
         if self._file_path:
@@ -301,15 +424,20 @@ class LoggerBuilder:
             if self._critical_writer_enabled:
                 writer = self._wrap_with_critical_writer(writer)
 
-            logger.add_writer(writer)
+            logger.add_writer(writer, name=self._file_name)
 
         # Add custom writers
-        for writer in self._custom_writers:
-            logger.add_writer(writer)
+        for writer, name in self._custom_writers:
+            logger.add_writer(writer, name=name)
 
         # Add custom filters
         for log_filter in self._custom_filters:
             logger.add_filter(log_filter)
+
+        # Apply route configurations
+        if self._route_configs and self._router:
+            for config_func in self._route_configs:
+                config_func(self._router)
 
         return logger
 
