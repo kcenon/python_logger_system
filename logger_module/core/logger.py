@@ -19,6 +19,8 @@ from logger_module.safety.signal_manager import SignalManager
 
 if TYPE_CHECKING:
     from logger_module.routing.log_router import LogRouter
+    from logger_module.monitoring.monitor import Monitor
+    from logger_module.monitoring.metrics import LoggerMetrics, MetricsCollector
 
 
 class Logger(CrashSafeLoggerMixin):
@@ -34,6 +36,11 @@ class Logger(CrashSafeLoggerMixin):
         self._log_queue: Optional[queue.Queue] = None
         self._worker_thread: Optional[threading.Thread] = None
         self._metrics = {"logged": 0, "dropped": 0, "processed": 0}
+
+        # Monitoring support
+        self._metrics_collector: Optional["MetricsCollector"] = None
+        self._monitor: Optional["Monitor"] = None
+        self._metrics_enabled = False
 
         # Initialize crash safety if enabled
         if self._config.crash_safe:
@@ -98,11 +105,14 @@ class Logger(CrashSafeLoggerMixin):
     def _write_batch(self, batch: List[LogEntry]):
         """Write batch of log entries to appropriate writers."""
         for entry in batch:
+            start_time = time.time() if self._metrics_enabled else 0
+
             # Buffer for emergency recovery if crash safety is enabled
             if self._crash_safety_enabled:
                 self._buffer_for_emergency(str(entry))
 
             # Use routing if configured, otherwise write to all writers
+            writer_error = False
             if self.has_routing():
                 self._router.dispatch(entry)
             else:
@@ -111,7 +121,25 @@ class Logger(CrashSafeLoggerMixin):
                         writer.write(entry)
                     except Exception as e:
                         print(f"Writer error: {e}")
+                        writer_error = True
+                        if self._metrics_collector:
+                            self._metrics_collector.record_writer_error()
+
             self._metrics["processed"] += 1
+
+            # Record metrics if enabled
+            if self._metrics_enabled and self._metrics_collector:
+                latency_ms = (time.time() - start_time) * 1000
+                self._metrics_collector.record_message(entry.level, latency_ms)
+
+                # Export to monitor if configured
+                if self._monitor:
+                    self._monitor.record_counter(
+                        "messages", 1, {"level": entry.level.name}
+                    )
+                    self._monitor.record_histogram("write_latency", latency_ms)
+                    if writer_error:
+                        self._monitor.record_counter("errors", 1)
 
     def add_writer(self, writer: Any, name: Optional[str] = None) -> None:
         """
@@ -199,8 +227,22 @@ class Logger(CrashSafeLoggerMixin):
             try:
                 self._log_queue.put_nowait(entry)
                 self._metrics["logged"] += 1
+                # Update queue depth metric
+                if self._metrics_enabled and self._metrics_collector:
+                    self._metrics_collector.record_queue_depth(
+                        self._log_queue.qsize()
+                    )
+                    if self._monitor:
+                        self._monitor.record_gauge(
+                            "queue_depth", self._log_queue.qsize()
+                        )
             except queue.Full:
                 self._metrics["dropped"] += 1
+                if self._metrics_enabled:
+                    if self._metrics_collector:
+                        self._metrics_collector.record_dropped()
+                    if self._monitor:
+                        self._monitor.record_counter("dropped", 1)
         else:
             self._write_batch([entry])
             self._metrics["logged"] += 1
@@ -268,3 +310,45 @@ class Logger(CrashSafeLoggerMixin):
     def get_metrics(self) -> dict:
         """Get logging metrics."""
         return self._metrics.copy()
+
+    def enable_metrics(self, enabled: bool = True) -> None:
+        """
+        Enable or disable detailed metrics collection.
+
+        Args:
+            enabled: Whether to enable metrics collection
+        """
+        self._metrics_enabled = enabled
+        if enabled and self._metrics_collector is None:
+            from logger_module.monitoring.metrics import MetricsCollector
+            self._metrics_collector = MetricsCollector()
+
+    def set_monitor(self, monitor: "Monitor") -> None:
+        """
+        Set external monitoring backend.
+
+        Args:
+            monitor: Monitor instance for exporting metrics
+        """
+        self._monitor = monitor
+        # Enable metrics collection if setting a monitor
+        if monitor is not None:
+            self.enable_metrics(True)
+
+    def get_detailed_metrics(self) -> "LoggerMetrics":
+        """
+        Get detailed metrics snapshot.
+
+        Returns:
+            LoggerMetrics with comprehensive metrics data.
+            Returns basic metrics if detailed collection is disabled.
+        """
+        if self._metrics_collector:
+            return self._metrics_collector.get_metrics()
+
+        # Return basic metrics wrapped in LoggerMetrics
+        from logger_module.monitoring.metrics import LoggerMetrics
+        return LoggerMetrics(
+            total_messages=self._metrics.get("logged", 0),
+            dropped_messages=self._metrics.get("dropped", 0),
+        )

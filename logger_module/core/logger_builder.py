@@ -14,6 +14,7 @@ from logger_module.writers.network_writer import TCPWriter, UDPWriter
 if TYPE_CHECKING:
     from logger_module.security.encryption_config import EncryptionConfig
     from logger_module.routing.log_router import LogRouter
+    from logger_module.monitoring.monitor import Monitor
 
 
 class LoggerBuilder:
@@ -35,6 +36,8 @@ class LoggerBuilder:
         self._wal_path: Optional[str] = None
         self._router: Optional["LogRouter"] = None
         self._route_configs: list[Callable[["LogRouter"], None]] = []
+        self._monitor: Optional["Monitor"] = None
+        self._metrics_enabled = False
 
     def with_name(self, name: str) -> "LoggerBuilder":
         """Set logger name."""
@@ -386,6 +389,72 @@ class LoggerBuilder:
         self._wal_path = wal_path
         return self
 
+    def with_monitoring(
+        self,
+        monitor: Optional["Monitor"] = None,
+        metrics_enabled: bool = True
+    ) -> "LoggerBuilder":
+        """
+        Enable monitoring and metrics collection.
+
+        Enables detailed metrics collection and optionally exports
+        metrics to an external monitoring system.
+
+        Args:
+            monitor: Optional Monitor instance for exporting metrics
+                    (Prometheus, StatsD, etc.)
+            metrics_enabled: Whether to enable detailed metrics collection
+
+        Returns:
+            Self for method chaining
+
+        Example:
+            from logger_module.monitoring import PrometheusMonitor
+
+            monitor = PrometheusMonitor(prefix="myapp_logger")
+
+            logger = (LoggerBuilder()
+                .with_console()
+                .with_monitoring(monitor, metrics_enabled=True)
+                .build())
+
+            # Get detailed metrics
+            metrics = logger.get_detailed_metrics()
+            print(f"Total messages: {metrics.total_messages}")
+        """
+        self._monitor = monitor
+        self._metrics_enabled = metrics_enabled
+        return self
+
+    def with_metrics(self, enabled: bool = True) -> "LoggerBuilder":
+        """
+        Enable detailed metrics collection.
+
+        Enables comprehensive metrics tracking without requiring
+        an external monitoring backend.
+
+        Args:
+            enabled: Whether to enable metrics collection
+
+        Returns:
+            Self for method chaining
+
+        Example:
+            logger = (LoggerBuilder()
+                .with_console()
+                .with_metrics(True)
+                .build())
+
+            # Log some messages
+            logger.info("Test message")
+
+            # Check metrics
+            metrics = logger.get_detailed_metrics()
+            print(f"Messages per second: {metrics.messages_per_second}")
+        """
+        self._metrics_enabled = enabled
+        return self
+
     def build(self) -> Logger:
         """Build and return configured logger."""
         logger = Logger(self._config)
@@ -438,6 +507,12 @@ class LoggerBuilder:
         if self._route_configs and self._router:
             for config_func in self._route_configs:
                 config_func(self._router)
+
+        # Enable monitoring if configured
+        if self._metrics_enabled:
+            logger.enable_metrics(True)
+        if self._monitor:
+            logger.set_monitor(self._monitor)
 
         return logger
 
