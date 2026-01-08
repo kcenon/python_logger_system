@@ -290,8 +290,9 @@ class RouteBuilder:
             if len(self._filters) == 1:
                 combined_filter = self._filters[0]
             else:
+                # Use default argument to capture filter list at definition time
                 filters = self._filters.copy()
-                combined_filter = lambda e: all(f(e) for f in filters)
+                combined_filter = lambda e, fs=filters: all(f(e) for f in fs)
 
         config = RouteConfig(
             name=self._name,
