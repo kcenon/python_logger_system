@@ -11,7 +11,8 @@ Python Logger System is a high-performance asynchronous logging framework for Py
 
 **Key Features:**
 - **Asynchronous Processing**: Non-blocking log operations with queue-based batching
-- **Multiple Writers**: Console, file, rotating file, network (TCP/UDP) support
+- **Multiple Writers**: Console, file, rotating file, network (TCP/UDP), batch writers
+- **Batch Writing**: High-performance batched I/O with adaptive sizing
 - **Log Routing**: Direct log entries to specific writers based on level, pattern, or custom rules
 - **Monitoring & Metrics**: Comprehensive metrics collection with Prometheus/StatsD integration
 - **Health Checks**: Kubernetes-ready liveness and readiness probes
@@ -120,6 +121,61 @@ udp_writer = UDPWriter(
     port=514
 )
 logger.add_writer(udp_writer)
+```
+
+**BatchWriter**: Buffered I/O for improved performance
+```python
+from logger_module.writers import BatchWriter, FileWriter
+
+# Via builder (recommended)
+logger = (LoggerBuilder()
+    .with_name("myapp")
+    .with_file("app.log")
+    .with_batching(
+        max_batch_size=100,      # Flush after 100 entries
+        flush_interval_ms=1000   # Or every 1 second
+    )
+    .build())
+
+# Manual batching
+file_writer = FileWriter("app.log")
+batch_writer = BatchWriter(
+    file_writer,
+    max_batch_size=100,
+    flush_interval=timedelta(seconds=1),
+    max_buffer_size=10000  # Drop entries if buffer exceeds this
+)
+logger.add_writer(batch_writer)
+```
+
+**AdaptiveBatchWriter**: Dynamic batch sizing based on throughput
+```python
+from logger_module.writers import AdaptiveBatchWriter, FileWriter
+
+# Via builder (recommended)
+logger = (LoggerBuilder()
+    .with_name("myapp")
+    .with_file("app.log")
+    .with_batching(
+        adaptive=True,
+        min_batch_size=10,
+        max_batch_size_limit=500
+    )
+    .build())
+
+# Manual adaptive batching
+file_writer = FileWriter("app.log")
+adaptive_writer = AdaptiveBatchWriter(
+    file_writer,
+    min_batch_size=10,
+    max_batch_size=500,
+    initial_batch_size=100
+)
+
+# Monitor batch statistics
+stats = adaptive_writer.get_adaptive_stats()
+print(f"Current batch size: {stats['current_batch_size']}")
+print(f"Write rate: {stats['current_rate']} entries/sec")
 ```
 
 ### Log Routing
@@ -477,7 +533,8 @@ python_logger_system/
 │   │   ├── console_writer.py   # Console output
 │   │   ├── file_writer.py      # File output
 │   │   ├── rotating_file_writer.py  # Rotating files
-│   │   └── network_writer.py   # TCP/UDP network logging
+│   │   ├── network_writer.py   # TCP/UDP network logging
+│   │   └── batch_writer.py     # Batched I/O for performance
 │   ├── routing/
 │   │   ├── log_router.py       # Main router
 │   │   ├── route_builder.py    # Fluent route configuration
@@ -516,6 +573,18 @@ python_logger_system/
 - Simpler debugging
 - ~10K messages/sec
 
+**Batched I/O Mode** (High-throughput):
+- Reduces syscall overhead by 90-99%
+- Configurable batch size and flush interval
+- Adaptive mode adjusts batch size based on throughput
+- Ideal for high-volume logging scenarios
+
+| Scenario | Without Batching | With Batching |
+|----------|-----------------|---------------|
+| 10K logs/sec | 10K syscalls/sec | ~100 syscalls/sec |
+| Disk I/O | High seek overhead | Sequential writes |
+| Network | Many small packets | Fewer large packets |
+
 ## Comparison with C++ Version
 
 | Feature | C++ logger_system | Python logger_system |
@@ -523,7 +592,7 @@ python_logger_system/
 | **Language** | C++20 | Python 3.8+ |
 | **Async** | Lock-free queue | queue.Queue |
 | **Performance** | ~1M msg/sec | ~100K msg/sec |
-| **Writers** | 10+ types | 5 core types |
+| **Writers** | 10+ types | 7 core types |
 | **Dependencies** | fmt, spdlog | None (stdlib) |
 | **Use Case** | High-perf C++ | Python apps |
 

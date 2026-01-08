@@ -10,6 +10,7 @@ from logger_module.writers.console_writer import ConsoleWriter
 from logger_module.writers.file_writer import FileWriter
 from logger_module.writers.rotating_file_writer import RotatingFileWriter
 from logger_module.writers.network_writer import TCPWriter, UDPWriter
+from logger_module.writers.batch_writer import BatchWriter, AdaptiveBatchWriter
 
 if TYPE_CHECKING:
     from logger_module.security.encryption_config import EncryptionConfig
@@ -38,6 +39,13 @@ class LoggerBuilder:
         self._route_configs: list[Callable[["LogRouter"], None]] = []
         self._monitor: Optional["Monitor"] = None
         self._metrics_enabled = False
+        self._batching_enabled = False
+        self._batching_max_batch_size = 100
+        self._batching_flush_interval_ms = 1000
+        self._batching_max_buffer_size = 10000
+        self._batching_adaptive = False
+        self._batching_min_batch_size = 10
+        self._batching_max_batch_size_limit = 500
 
     def with_name(self, name: str) -> "LoggerBuilder":
         """Set logger name."""
@@ -455,6 +463,55 @@ class LoggerBuilder:
         self._metrics_enabled = enabled
         return self
 
+    def with_batching(
+        self,
+        max_batch_size: int = 100,
+        flush_interval_ms: int = 1000,
+        max_buffer_size: int = 10000,
+        adaptive: bool = False,
+        min_batch_size: int = 10,
+        max_batch_size_limit: int = 500,
+    ) -> "LoggerBuilder":
+        """
+        Enable batch writing for improved I/O performance.
+
+        When enabled, all writers are wrapped with BatchWriter (or
+        AdaptiveBatchWriter if adaptive=True) to buffer log entries
+        and write them in batches, reducing syscall overhead.
+
+        Args:
+            max_batch_size: Maximum entries before triggering batch flush
+            flush_interval_ms: Time interval for periodic flush in milliseconds
+            max_buffer_size: Maximum buffer capacity before dropping entries
+            adaptive: Use AdaptiveBatchWriter for dynamic batch sizing
+            min_batch_size: Minimum batch size for adaptive mode
+            max_batch_size_limit: Maximum batch size limit for adaptive mode
+
+        Returns:
+            Self for method chaining
+
+        Example:
+            # Basic batching
+            logger = (LoggerBuilder()
+                .with_file("app.log")
+                .with_batching(max_batch_size=100, flush_interval_ms=1000)
+                .build())
+
+            # Adaptive batching for variable throughput
+            logger = (LoggerBuilder()
+                .with_file("app.log")
+                .with_batching(adaptive=True, min_batch_size=10, max_batch_size_limit=500)
+                .build())
+        """
+        self._batching_enabled = True
+        self._batching_max_batch_size = max_batch_size
+        self._batching_flush_interval_ms = flush_interval_ms
+        self._batching_max_buffer_size = max_buffer_size
+        self._batching_adaptive = adaptive
+        self._batching_min_batch_size = min_batch_size
+        self._batching_max_batch_size_limit = max_batch_size_limit
+        return self
+
     def build(self) -> Logger:
         """Build and return configured logger."""
         logger = Logger(self._config)
@@ -493,10 +550,17 @@ class LoggerBuilder:
             if self._critical_writer_enabled:
                 writer = self._wrap_with_critical_writer(writer)
 
+            # Wrap with batch writer if configured
+            if self._batching_enabled:
+                writer = self._wrap_with_batch_writer(writer)
+
             logger.add_writer(writer, name=self._file_name)
 
         # Add custom writers
         for writer, name in self._custom_writers:
+            # Wrap with batch writer if configured
+            if self._batching_enabled:
+                writer = self._wrap_with_batch_writer(writer)
             logger.add_writer(writer, name=name)
 
         # Add custom filters
@@ -532,4 +596,27 @@ class LoggerBuilder:
                 writer,
                 force_flush_levels=self._critical_force_flush_levels,
                 sync_on_critical=self._critical_sync_on_critical
+            )
+
+    def _wrap_with_batch_writer(self, writer):
+        """Wrap a writer with BatchWriter or AdaptiveBatchWriter."""
+        from datetime import timedelta
+
+        flush_interval = timedelta(milliseconds=self._batching_flush_interval_ms)
+
+        if self._batching_adaptive:
+            return AdaptiveBatchWriter(
+                inner_writer=writer,
+                min_batch_size=self._batching_min_batch_size,
+                max_batch_size=self._batching_max_batch_size_limit,
+                initial_batch_size=self._batching_max_batch_size,
+                flush_interval=flush_interval,
+                max_buffer_size=self._batching_max_buffer_size,
+            )
+        else:
+            return BatchWriter(
+                inner_writer=writer,
+                max_batch_size=self._batching_max_batch_size,
+                flush_interval=flush_interval,
+                max_buffer_size=self._batching_max_buffer_size,
             )

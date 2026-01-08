@@ -9,6 +9,11 @@ from logger_module.writers.network_writer import (
     TCPWriter,
     UDPWriter,
 )
+from logger_module.writers.batch_writer import (
+    BatchStats,
+    BatchWriter,
+    AdaptiveBatchWriter,
+)
 
 __all__ = [
     "ConsoleWriter",
@@ -18,4 +23,7 @@ __all__ = [
     "NetworkWriter",
     "TCPWriter",
     "UDPWriter",
+    "BatchStats",
+    "BatchWriter",
+    "AdaptiveBatchWriter",
 ]
