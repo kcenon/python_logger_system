@@ -14,10 +14,12 @@ import atexit
 from logger_module.core.log_level import LogLevel
 from logger_module.core.log_entry import LogEntry
 from logger_module.core.logger_config import LoggerConfig
+from logger_module.safety.crash_safe_mixin import CrashSafeLoggerMixin
+from logger_module.safety.signal_manager import SignalManager
 
 
-class Logger:
-    """Main logger class with async support."""
+class Logger(CrashSafeLoggerMixin):
+    """Main logger class with async support and crash safety."""
 
     def __init__(self, config: Optional[LoggerConfig] = None):
         self._config = config or LoggerConfig.default()
@@ -27,10 +29,22 @@ class Logger:
         self._log_queue: Optional[queue.Queue] = None
         self._worker_thread: Optional[threading.Thread] = None
         self._metrics = {"logged": 0, "dropped": 0, "processed": 0}
-        
+
+        # Initialize crash safety if enabled
+        if self._config.crash_safe:
+            self._init_crash_safety(
+                mmap_path=self._config.mmap_buffer_path,
+                mmap_size=self._config.mmap_buffer_size
+            )
+        else:
+            # Initialize minimal crash safety attributes
+            self._emergency_buffer = None
+            self._mmap_buffer = None
+            self._crash_safety_enabled = False
+
         if self._config.async_mode:
             self._start_async_worker()
-        
+
         atexit.register(self.shutdown)
 
     def _start_async_worker(self):
@@ -79,6 +93,10 @@ class Logger:
     def _write_batch(self, batch: List[LogEntry]):
         """Write batch of log entries to all writers."""
         for entry in batch:
+            # Buffer for emergency recovery if crash safety is enabled
+            if self._crash_safety_enabled:
+                self._buffer_for_emergency(str(entry))
+
             for writer in self._writers:
                 try:
                     writer.write(entry)
@@ -170,16 +188,21 @@ class Logger:
 
     def shutdown(self):
         """Shutdown logger gracefully."""
-        if not self._running:
-            return
-        
-        self._running = False
-        if self._worker_thread:
-            self._worker_thread.join(timeout=5.0)
-        
+        if not self._running and not self._config.async_mode:
+            # Only return early if we never started async mode
+            pass
+        else:
+            self._running = False
+            if self._worker_thread:
+                self._worker_thread.join(timeout=5.0)
+
         for writer in self._writers:
             if hasattr(writer, 'close'):
                 writer.close()
+
+        # Cleanup crash safety resources
+        if self._crash_safety_enabled:
+            self._cleanup_crash_safety()
 
     def get_metrics(self) -> dict:
         """Get logging metrics."""

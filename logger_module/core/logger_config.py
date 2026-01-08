@@ -43,6 +43,11 @@ class LoggerConfig:
     enable_metrics: bool = False
     thread_safe: bool = True
 
+    # Crash safety settings
+    crash_safe: bool = False
+    mmap_buffer_path: Optional[str] = None
+    mmap_buffer_size: int = 1024 * 1024  # 1 MB
+
     # Format settings
     timestamp_format: str = "%Y-%m-%d %H:%M:%S.%f"
     message_format: str = "[{timestamp}] [{level:8}] [{thread}] {message}"
