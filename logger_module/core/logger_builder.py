@@ -80,6 +80,37 @@ class LoggerBuilder:
         self._custom_filters.append(log_filter)
         return self
 
+    def with_crash_safety(
+        self,
+        enabled: bool = True,
+        mmap_path: Optional[str] = None,
+        mmap_size: int = 1024 * 1024
+    ) -> "LoggerBuilder":
+        """
+        Enable crash-safe logging.
+
+        When enabled, logs are buffered for emergency recovery on crashes
+        and optionally stored in a memory-mapped file for durability.
+
+        Args:
+            enabled: Whether to enable crash safety
+            mmap_path: Path for memory-mapped buffer (optional)
+            mmap_size: Size of memory-mapped buffer in bytes
+
+        Returns:
+            Self for method chaining
+
+        Example:
+            logger = (LoggerBuilder()
+                .with_crash_safety(True, mmap_path="/tmp/app.mmap")
+                .build())
+        """
+        self._config.crash_safe = enabled
+        if mmap_path:
+            self._config.mmap_buffer_path = mmap_path
+        self._config.mmap_buffer_size = mmap_size
+        return self
+
     def build(self) -> Logger:
         """Build and return configured logger."""
         logger = Logger(self._config)

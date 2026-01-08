@@ -15,6 +15,7 @@ Python Logger System is a high-performance asynchronous logging framework for Py
 - **Thread-Safe**: Concurrent logging from multiple threads
 - **Builder Pattern**: Fluent API for logger construction
 - **Colored Output**: ANSI-colored console output
+- **Crash-Safe Logging**: Signal handlers and memory-mapped buffers for durability
 - **Zero External Dependencies**: Uses only Python standard library
 
 ## Quick Start
@@ -113,6 +114,41 @@ logger = (LoggerBuilder()
     .build())
 ```
 
+### Crash-Safe Logging
+
+Enable crash-safe mode for durability:
+
+```python
+from logger_module import LoggerBuilder
+
+# Enable crash safety with memory-mapped buffer
+logger = (LoggerBuilder()
+    .with_name("myapp")
+    .with_crash_safety(
+        enabled=True,
+        mmap_path="/tmp/myapp.mmap",
+        mmap_size=1024*1024  # 1 MB
+    )
+    .build())
+
+logger.info("This will survive crashes")
+```
+
+Recover logs after a crash:
+
+```python
+from logger_module.safety import recover_from_mmap, recover_all
+
+# Recover from specific mmap file
+entries = recover_from_mmap("/tmp/myapp.mmap")
+for entry in entries:
+    print(entry)
+
+# Recover all crash logs from directory
+stats = recover_all("/tmp", output_file="recovered.log", cleanup=True)
+print(f"Recovered {stats['total_entries']} entries")
+```
+
 ## Architecture
 
 ```
@@ -124,10 +160,15 @@ python_logger_system/
 │   │   ├── logger_config.py    # Configuration
 │   │   ├── log_entry.py        # Log entry structure
 │   │   └── log_level.py        # Log levels
-│   └── writers/
-│       ├── console_writer.py   # Console output
-│       ├── file_writer.py      # File output
-│       └── rotating_file_writer.py  # Rotating files
+│   ├── writers/
+│   │   ├── console_writer.py   # Console output
+│   │   ├── file_writer.py      # File output
+│   │   └── rotating_file_writer.py  # Rotating files
+│   └── safety/
+│       ├── signal_manager.py   # Signal handlers
+│       ├── mmap_buffer.py      # Memory-mapped buffer
+│       ├── crash_safe_mixin.py # Crash-safe mixin
+│       └── recovery.py         # Log recovery utilities
 ├── tests/                      # Unit tests
 ├── examples/                   # Examples
 └── docs/                       # Documentation
