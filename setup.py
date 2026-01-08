@@ -31,5 +31,6 @@ setup(
     install_requires=[],
     extras_require={
         "dev": ["pytest>=7.0.0", "pytest-cov>=4.0.0", "black>=23.0.0"],
+        "security": ["cryptography>=41.0.0"],
     },
 )

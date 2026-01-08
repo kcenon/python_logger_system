@@ -9,3 +9,7 @@ build/
 htmlcov/
 *.log
 *.log.*
+
+# macOS
+.DS_Store
+.venv/

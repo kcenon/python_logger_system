@@ -16,7 +16,8 @@ Python Logger System is a high-performance asynchronous logging framework for Py
 - **Builder Pattern**: Fluent API for logger construction
 - **Colored Output**: ANSI-colored console output
 - **Crash-Safe Logging**: Signal handlers and memory-mapped buffers for durability
-- **Zero External Dependencies**: Uses only Python standard library
+- **Encrypted Logging**: AES-256-GCM, AES-256-CBC, ChaCha20-Poly1305 encryption
+- **Zero External Dependencies**: Uses only Python standard library (encryption requires `cryptography`)
 
 ## Quick Start
 
@@ -149,6 +150,67 @@ stats = recover_all("/tmp", output_file="recovered.log", cleanup=True)
 print(f"Recovered {stats['total_entries']} entries")
 ```
 
+### Encrypted Logging
+
+Encrypt log files for compliance (GDPR, HIPAA, PCI DSS):
+
+```bash
+# Install cryptography dependency
+pip install python-logger-system[security]
+```
+
+```python
+from logger_module import LoggerBuilder
+from logger_module.security import (
+    EncryptionConfig,
+    EncryptionAlgorithm,
+    generate_key,
+    save_key_to_file,
+    LogDecryptor,
+)
+
+# Generate and save encryption key
+key = generate_key()
+save_key_to_file(key, "secret.key")
+
+# Create encrypted logger
+config = EncryptionConfig(
+    key=key,
+    algorithm=EncryptionAlgorithm.AES_256_GCM
+)
+
+logger = (LoggerBuilder()
+    .with_name("secure-app")
+    .with_file("secure.log.enc")
+    .with_encryption(config)
+    .build())
+
+logger.info("This message is encrypted at rest")
+logger.shutdown()
+```
+
+Decrypt logs for analysis:
+
+```python
+from logger_module.security import LogDecryptor, load_key_from_file
+
+key = load_key_from_file("secret.key")
+decryptor = LogDecryptor(key)
+
+# Decrypt file
+logs = decryptor.decrypt_file("secure.log.enc")
+for log in logs:
+    print(log)
+
+# Or decrypt to output file
+decryptor.decrypt_to_file("secure.log.enc", "decrypted.log")
+```
+
+Supported algorithms:
+- **AES-256-GCM** (default): Authenticated encryption, recommended
+- **AES-256-CBC**: Classic block cipher
+- **ChaCha20-Poly1305**: Modern stream cipher
+
 ## Architecture
 
 ```
@@ -164,11 +226,16 @@ python_logger_system/
 │   │   ├── console_writer.py   # Console output
 │   │   ├── file_writer.py      # File output
 │   │   └── rotating_file_writer.py  # Rotating files
-│   └── safety/
-│       ├── signal_manager.py   # Signal handlers
-│       ├── mmap_buffer.py      # Memory-mapped buffer
-│       ├── crash_safe_mixin.py # Crash-safe mixin
-│       └── recovery.py         # Log recovery utilities
+│   ├── safety/
+│   │   ├── signal_manager.py   # Signal handlers
+│   │   ├── mmap_buffer.py      # Memory-mapped buffer
+│   │   ├── crash_safe_mixin.py # Crash-safe mixin
+│   │   └── recovery.py         # Log recovery utilities
+│   └── security/
+│       ├── encrypted_writer.py # Encryption writer
+│       ├── encryption_config.py # Encryption configuration
+│       ├── key_management.py   # Key utilities
+│       └── decryptor.py        # Log decryption
 ├── tests/                      # Unit tests
 ├── examples/                   # Examples
 └── docs/                       # Documentation
