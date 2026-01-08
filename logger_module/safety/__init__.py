@@ -5,6 +5,7 @@ Provides crash-safe logging capabilities including:
 - Signal handlers for emergency flush
 - Memory-mapped buffers for durability
 - Log recovery utilities
+- Critical writers for guaranteed log persistence
 """
 
 from logger_module.safety.signal_manager import SignalManager
@@ -20,6 +21,8 @@ from logger_module.safety.recovery import (
     recover_all,
     cleanup_old_crash_logs,
 )
+from logger_module.safety.critical_writer import CriticalWriter
+from logger_module.safety.wal_critical_writer import WALCriticalWriter
 
 __all__ = [
     "SignalManager",
@@ -31,4 +34,6 @@ __all__ = [
     "find_crash_logs",
     "recover_all",
     "cleanup_old_crash_logs",
+    "CriticalWriter",
+    "WALCriticalWriter",
 ]
