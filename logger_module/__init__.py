@@ -21,6 +21,7 @@ from logger_module.core.logger_config import LoggerConfig
 # Import submodules (not all classes by default)
 from logger_module import filters
 from logger_module import formatters
+from logger_module import routing
 from logger_module import safety
 from logger_module import security
 
@@ -32,6 +33,7 @@ __all__ = [
     "LoggerConfig",
     "filters",
     "formatters",
+    "routing",
     "safety",
     "security",
 ]
