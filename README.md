@@ -11,7 +11,7 @@ Python Logger System is a high-performance asynchronous logging framework for Py
 
 **Key Features:**
 - **Asynchronous Processing**: Non-blocking log operations with queue-based batching
-- **Multiple Writers**: Console, file, rotating file support
+- **Multiple Writers**: Console, file, rotating file, network (TCP/UDP) support
 - **Thread-Safe**: Concurrent logging from multiple threads
 - **Builder Pattern**: Fluent API for logger construction
 - **Colored Output**: ANSI-colored console output
@@ -80,6 +80,43 @@ logger.add_writer(RotatingFileWriter(
     max_bytes=10*1024*1024,  # 10 MB
     backup_count=5
 ))
+```
+
+**TCPWriter**: Reliable network logging with auto-reconnect
+```python
+from logger_module.writers import TCPWriter
+
+# Via builder
+logger = (LoggerBuilder()
+    .with_tcp("log-server.example.com", 5140)
+    .build())
+
+# Or manually
+tcp_writer = TCPWriter(
+    host="log-server.example.com",
+    port=5140,
+    timeout=5.0,
+    reconnect_attempts=3,
+    use_ssl=True  # Enable TLS encryption
+)
+logger.add_writer(tcp_writer)
+```
+
+**UDPWriter**: High-throughput fire-and-forget logging
+```python
+from logger_module.writers import UDPWriter
+
+# Via builder
+logger = (LoggerBuilder()
+    .with_udp("syslog.example.com", 514)
+    .build())
+
+# Or manually
+udp_writer = UDPWriter(
+    host="syslog.example.com",
+    port=514
+)
+logger.add_writer(udp_writer)
 ```
 
 ### Configuration
@@ -285,7 +322,8 @@ python_logger_system/
 │   ├── writers/
 │   │   ├── console_writer.py   # Console output
 │   │   ├── file_writer.py      # File output
-│   │   └── rotating_file_writer.py  # Rotating files
+│   │   ├── rotating_file_writer.py  # Rotating files
+│   │   └── network_writer.py   # TCP/UDP network logging
 │   ├── safety/
 │   │   ├── signal_manager.py   # Signal handlers
 │   │   ├── mmap_buffer.py      # Memory-mapped buffer
@@ -322,7 +360,7 @@ python_logger_system/
 | **Language** | C++20 | Python 3.8+ |
 | **Async** | Lock-free queue | queue.Queue |
 | **Performance** | ~1M msg/sec | ~100K msg/sec |
-| **Writers** | 10+ types | 3 core types |
+| **Writers** | 10+ types | 5 core types |
 | **Dependencies** | fmt, spdlog | None (stdlib) |
 | **Use Case** | High-perf C++ | Python apps |
 
