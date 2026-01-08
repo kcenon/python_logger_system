@@ -1,6 +1,6 @@
 """Logger builder pattern"""
 
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, Set, TYPE_CHECKING
 from pathlib import Path
 
 from logger_module.core.logger import Logger
@@ -25,6 +25,10 @@ class LoggerBuilder:
         self._custom_writers = []
         self._custom_filters = []
         self._encryption_config: Optional["EncryptionConfig"] = None
+        self._critical_writer_enabled = False
+        self._critical_force_flush_levels: Optional[Set[LogLevel]] = None
+        self._critical_sync_on_critical = True
+        self._wal_path: Optional[str] = None
 
     def with_name(self, name: str) -> "LoggerBuilder":
         """Set logger name."""
@@ -158,6 +162,44 @@ class LoggerBuilder:
         self._custom_writers.append(writer)
         return self
 
+    def with_critical_writer(
+        self,
+        enabled: bool = True,
+        force_flush_levels: Optional[Set[LogLevel]] = None,
+        sync_on_critical: bool = True,
+        wal_path: Optional[str] = None
+    ) -> "LoggerBuilder":
+        """
+        Enable CriticalWriter for crash-safe file logging.
+
+        When enabled, file writers are wrapped with CriticalWriter
+        to ensure ERROR and CRITICAL logs are never lost.
+
+        Args:
+            enabled: Whether to enable critical writer
+            force_flush_levels: Log levels that trigger immediate flush
+                               (default: ERROR, CRITICAL)
+            sync_on_critical: Force OS disk sync for critical logs
+            wal_path: Optional WAL path for crash recovery support
+
+        Returns:
+            Self for method chaining
+
+        Example:
+            logger = (LoggerBuilder()
+                .with_file("app.log")
+                .with_critical_writer(
+                    force_flush_levels={LogLevel.ERROR, LogLevel.CRITICAL},
+                    wal_path="/tmp/app.wal"
+                )
+                .build())
+        """
+        self._critical_writer_enabled = enabled
+        self._critical_force_flush_levels = force_flush_levels
+        self._critical_sync_on_critical = sync_on_critical
+        self._wal_path = wal_path
+        return self
+
     def build(self) -> Logger:
         """Build and return configured logger."""
         logger = Logger(self._config)
@@ -182,6 +224,10 @@ class LoggerBuilder:
                 from logger_module.security.encrypted_writer import EncryptedWriter
                 writer = EncryptedWriter(writer, self._encryption_config)
 
+            # Wrap with critical writer if configured
+            if self._critical_writer_enabled:
+                writer = self._wrap_with_critical_writer(writer)
+
             logger.add_writer(writer)
 
         # Add custom writers
@@ -193,3 +239,21 @@ class LoggerBuilder:
             logger.add_filter(log_filter)
 
         return logger
+
+    def _wrap_with_critical_writer(self, writer):
+        """Wrap a writer with CriticalWriter or WALCriticalWriter."""
+        if self._wal_path:
+            from logger_module.safety.wal_critical_writer import WALCriticalWriter
+            return WALCriticalWriter(
+                writer,
+                wal_path=self._wal_path,
+                force_flush_levels=self._critical_force_flush_levels,
+                sync_on_critical=self._critical_sync_on_critical
+            )
+        else:
+            from logger_module.safety.critical_writer import CriticalWriter
+            return CriticalWriter(
+                writer,
+                force_flush_levels=self._critical_force_flush_levels,
+                sync_on_critical=self._critical_sync_on_critical
+            )
