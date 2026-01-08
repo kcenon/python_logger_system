@@ -1,6 +1,6 @@
 """Logger builder pattern"""
 
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 from pathlib import Path
 
 from logger_module.core.logger import Logger
@@ -9,6 +9,9 @@ from logger_module.core.log_level import LogLevel
 from logger_module.writers.console_writer import ConsoleWriter
 from logger_module.writers.file_writer import FileWriter
 from logger_module.writers.rotating_file_writer import RotatingFileWriter
+
+if TYPE_CHECKING:
+    from logger_module.security.encryption_config import EncryptionConfig
 
 
 class LoggerBuilder:
@@ -21,6 +24,7 @@ class LoggerBuilder:
         self._rotating_file = False
         self._custom_writers = []
         self._custom_filters = []
+        self._encryption_config: Optional["EncryptionConfig"] = None
 
     def with_name(self, name: str) -> "LoggerBuilder":
         """Set logger name."""
@@ -111,6 +115,49 @@ class LoggerBuilder:
         self._config.mmap_buffer_size = mmap_size
         return self
 
+    def with_encryption(
+        self,
+        config: "EncryptionConfig",
+    ) -> "LoggerBuilder":
+        """
+        Enable encryption for file writers.
+
+        When enabled, file output will be encrypted using the specified
+        configuration. Console output is not encrypted.
+
+        Args:
+            config: Encryption configuration with key and algorithm
+
+        Returns:
+            Self for method chaining
+
+        Example:
+            from logger_module.security import EncryptionConfig, generate_key
+
+            key = generate_key()
+            config = EncryptionConfig(key=key)
+
+            logger = (LoggerBuilder()
+                .with_file("secure.log.enc")
+                .with_encryption(config)
+                .build())
+        """
+        self._encryption_config = config
+        return self
+
+    def add_writer(self, writer) -> "LoggerBuilder":
+        """
+        Add a custom writer.
+
+        Args:
+            writer: Writer instance
+
+        Returns:
+            Self for method chaining
+        """
+        self._custom_writers.append(writer)
+        return self
+
     def build(self) -> Logger:
         """Build and return configured logger."""
         logger = Logger(self._config)
@@ -129,6 +176,12 @@ class LoggerBuilder:
                 )
             else:
                 writer = FileWriter(str(self._file_path))
+
+            # Wrap with encryption if configured
+            if self._encryption_config:
+                from logger_module.security.encrypted_writer import EncryptedWriter
+                writer = EncryptedWriter(writer, self._encryption_config)
+
             logger.add_writer(writer)
 
         # Add custom writers
