@@ -5,7 +5,7 @@ Equivalent to C++ logger.h
 """
 
 from __future__ import annotations
-from typing import Optional, List, Any
+from typing import Optional, List, Any, TYPE_CHECKING
 import threading
 import queue
 import time
@@ -17,14 +17,19 @@ from logger_module.core.logger_config import LoggerConfig
 from logger_module.safety.crash_safe_mixin import CrashSafeLoggerMixin
 from logger_module.safety.signal_manager import SignalManager
 
+if TYPE_CHECKING:
+    from logger_module.routing.log_router import LogRouter
+
 
 class Logger(CrashSafeLoggerMixin):
-    """Main logger class with async support and crash safety."""
+    """Main logger class with async support, crash safety, and routing."""
 
     def __init__(self, config: Optional[LoggerConfig] = None):
         self._config = config or LoggerConfig.default()
         self._writers: List[Any] = []
+        self._named_writers: dict[str, Any] = {}
         self._filters: List[Any] = []
+        self._router: Optional["LogRouter"] = None
         self._running = False
         self._log_queue: Optional[queue.Queue] = None
         self._worker_thread: Optional[threading.Thread] = None
@@ -91,22 +96,78 @@ class Logger(CrashSafeLoggerMixin):
                     last_flush = time.time()
 
     def _write_batch(self, batch: List[LogEntry]):
-        """Write batch of log entries to all writers."""
+        """Write batch of log entries to appropriate writers."""
         for entry in batch:
             # Buffer for emergency recovery if crash safety is enabled
             if self._crash_safety_enabled:
                 self._buffer_for_emergency(str(entry))
 
-            for writer in self._writers:
-                try:
-                    writer.write(entry)
-                except Exception as e:
-                    print(f"Writer error: {e}")
+            # Use routing if configured, otherwise write to all writers
+            if self.has_routing():
+                self._router.dispatch(entry)
+            else:
+                for writer in self._writers:
+                    try:
+                        writer.write(entry)
+                    except Exception as e:
+                        print(f"Writer error: {e}")
             self._metrics["processed"] += 1
 
-    def add_writer(self, writer: Any) -> None:
-        """Add a log writer."""
+    def add_writer(self, writer: Any, name: Optional[str] = None) -> None:
+        """
+        Add a log writer.
+
+        Args:
+            writer: Writer instance with write(entry) method
+            name: Optional name for routing (enables routing to this writer)
+        """
         self._writers.append(writer)
+        if name:
+            self._named_writers[name] = writer
+            if self._router:
+                self._router.register_writer(name, writer)
+
+    def get_router(self) -> "LogRouter":
+        """
+        Get the log router for this logger.
+
+        Creates a router if one doesn't exist and registers all named writers.
+
+        Returns:
+            LogRouter instance
+        """
+        if self._router is None:
+            from logger_module.routing.log_router import LogRouter
+            self._router = LogRouter()
+            # Register existing named writers
+            for name, writer in self._named_writers.items():
+                self._router.register_writer(name, writer)
+        return self._router
+
+    def set_router(self, router: "LogRouter") -> None:
+        """
+        Set a custom router for this logger.
+
+        Args:
+            router: LogRouter instance
+
+        Note:
+            Named writers will be registered with the new router.
+        """
+        self._router = router
+        # Register existing named writers with new router
+        for name, writer in self._named_writers.items():
+            if router.get_writer(name) is None:
+                router.register_writer(name, writer)
+
+    def has_routing(self) -> bool:
+        """
+        Check if routing is enabled.
+
+        Returns:
+            True if router has routes configured
+        """
+        return self._router is not None and len(self._router.get_routes()) > 0
 
     def add_filter(self, log_filter: Any) -> None:
         """
