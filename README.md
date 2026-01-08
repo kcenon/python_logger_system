@@ -12,6 +12,7 @@ Python Logger System is a high-performance asynchronous logging framework for Py
 **Key Features:**
 - **Asynchronous Processing**: Non-blocking log operations with queue-based batching
 - **Multiple Writers**: Console, file, rotating file, network (TCP/UDP) support
+- **Log Routing**: Direct log entries to specific writers based on level, pattern, or custom rules
 - **Thread-Safe**: Concurrent logging from multiple threads
 - **Builder Pattern**: Fluent API for logger construction
 - **Colored Output**: ANSI-colored console output
@@ -118,6 +119,61 @@ udp_writer = UDPWriter(
 )
 logger.add_writer(udp_writer)
 ```
+
+### Log Routing
+
+Direct log entries to specific writers based on configurable rules:
+
+```python
+from logger_module import LoggerBuilder, LogLevel
+from logger_module.routing import LogRouter
+
+# Create logger with named writers
+logger = (LoggerBuilder()
+    .with_name("myapp")
+    .with_console(name="console")
+    .with_file("errors.log", name="errors")
+    .with_file("security.log", name="security")
+    .with_routing()
+    .build())
+
+# Configure routing rules
+router = logger.get_router()
+
+# Route ERROR and CRITICAL to dedicated error file
+router.route() \
+    .when_level(LogLevel.ERROR, LogLevel.CRITICAL) \
+    .route_to("errors", "console") \
+    .build()
+
+# Route security-related logs (stop further processing)
+router.route() \
+    .when_matches(r"(login|logout|permission|access)") \
+    .route_to("security") \
+    .stop() \
+    .build()
+
+# Set default for unmatched entries
+router.set_default_writers("console")
+
+# Now logs are routed automatically
+logger.error("Database error")           # -> errors, console
+logger.info("User login successful")     # -> security (stops)
+logger.info("Processing request")        # -> console (default)
+
+logger.shutdown()
+```
+
+**Available routing filters:**
+- `when_level(*levels)` - Match specific log levels
+- `when_level_at_least(min_level)` - Match levels >= minimum
+- `when_level_between(min, max)` - Match level range
+- `when_matches(pattern)` - Match message regex pattern
+- `when_logger_name(*names)` - Match logger names
+- `when_has_extra(key)` - Match entries with extra field
+- `when_extra_equals(key, value)` - Match extra field value
+- `when(predicate)` - Custom predicate function
+- `stop()` - Stop propagation on match
 
 ### Configuration
 
@@ -324,6 +380,10 @@ python_logger_system/
 │   │   ├── file_writer.py      # File output
 │   │   ├── rotating_file_writer.py  # Rotating files
 │   │   └── network_writer.py   # TCP/UDP network logging
+│   ├── routing/
+│   │   ├── log_router.py       # Main router
+│   │   ├── route_builder.py    # Fluent route configuration
+│   │   └── route_config.py     # Route configuration
 │   ├── safety/
 │   │   ├── signal_manager.py   # Signal handlers
 │   │   ├── mmap_buffer.py      # Memory-mapped buffer
