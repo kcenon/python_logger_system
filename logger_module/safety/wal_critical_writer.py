@@ -151,9 +151,9 @@ class WALCriticalWriter(CriticalWriter):
                 'level': entry.level.name,
                 'message': entry.message,
                 'logger_name': entry.logger_name,
-                'source_file': entry.source_file,
-                'source_line': entry.source_line,
-                'context': entry.context
+                'file_name': entry.file_name,
+                'line_number': entry.line_number,
+                'extra': entry.extra
             }
 
             self._wal_file.write(json.dumps(wal_entry) + '\n')
@@ -254,9 +254,9 @@ class WALCriticalWriter(CriticalWriter):
                         message=data['message'],
                         level=LogLevel.from_string(data['level']),
                         logger_name=data.get('logger_name', 'recovered'),
-                        source_file=data.get('source_file'),
-                        source_line=data.get('source_line'),
-                        context=data.get('context', {})
+                        file_name=data.get('file_name', ''),
+                        line_number=data.get('line_number', 0),
+                        extra=data.get('extra', {})
                     )
                     entries.append(entry)
 

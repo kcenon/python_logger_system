@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from logger_module import LoggerBuilder, LogLevel, Logger, LoggerConfig
+from logger_module.core.log_entry import LogEntry
 from logger_module.safety import (
     SignalManager,
     MMapLogBuffer,
@@ -17,6 +18,8 @@ from logger_module.safety import (
     recover_from_emergency_logs,
     find_crash_logs,
     cleanup_old_crash_logs,
+    CriticalWriter,
+    WALCriticalWriter,
 )
 
 
@@ -344,3 +347,417 @@ class TestEmergencyLogFile:
             with open(path, 'r') as f:
                 content = f.read()
                 assert "Test message" in content
+
+
+class TestCriticalWriter:
+    """Test CriticalWriter functionality."""
+
+    def setup_method(self):
+        """Reset signal manager before each test."""
+        SignalManager.reset()
+
+    def teardown_method(self):
+        """Reset signal manager after each test."""
+        SignalManager.reset()
+
+    def test_write_normal_level(self):
+        """Test writing normal level logs."""
+        written = []
+
+        class MockWriter:
+            def write(self, entry):
+                written.append(entry)
+
+            def flush(self):
+                pass
+
+        mock = MockWriter()
+        writer = CriticalWriter(mock, enable_signal_handlers=False)
+
+        entry = LogEntry(message="Test", level=LogLevel.INFO)
+        writer.write(entry)
+
+        assert len(written) == 1
+        writer.close()
+
+    def test_flush_on_error_level(self):
+        """Test immediate flush on ERROR level."""
+        flush_count = 0
+
+        class MockWriter:
+            def write(self, entry):
+                pass
+
+            def flush(self):
+                nonlocal flush_count
+                flush_count += 1
+
+        mock = MockWriter()
+        writer = CriticalWriter(mock, enable_signal_handlers=False)
+
+        entry = LogEntry(message="Error occurred", level=LogLevel.ERROR)
+        writer.write(entry)
+
+        assert flush_count == 1
+        writer.close()
+
+    def test_flush_on_critical_level(self):
+        """Test immediate flush on CRITICAL level."""
+        flush_count = 0
+
+        class MockWriter:
+            def write(self, entry):
+                pass
+
+            def flush(self):
+                nonlocal flush_count
+                flush_count += 1
+
+        mock = MockWriter()
+        writer = CriticalWriter(mock, enable_signal_handlers=False)
+
+        entry = LogEntry(message="Critical failure", level=LogLevel.CRITICAL)
+        writer.write(entry)
+
+        assert flush_count == 1
+        writer.close()
+
+    def test_no_flush_on_info_level(self):
+        """Test no immediate flush on INFO level."""
+        flush_count = 0
+
+        class MockWriter:
+            def write(self, entry):
+                pass
+
+            def flush(self):
+                nonlocal flush_count
+                flush_count += 1
+
+        mock = MockWriter()
+        writer = CriticalWriter(mock, enable_signal_handlers=False)
+
+        entry = LogEntry(message="Info message", level=LogLevel.INFO)
+        writer.write(entry)
+
+        # Should not trigger flush for INFO level
+        assert flush_count == 0
+        writer.close()
+
+    def test_custom_force_flush_levels(self):
+        """Test custom force flush levels."""
+        flush_count = 0
+
+        class MockWriter:
+            def write(self, entry):
+                pass
+
+            def flush(self):
+                nonlocal flush_count
+                flush_count += 1
+
+        mock = MockWriter()
+        writer = CriticalWriter(
+            mock,
+            force_flush_levels={LogLevel.WARN, LogLevel.ERROR, LogLevel.CRITICAL},
+            enable_signal_handlers=False
+        )
+
+        entry = LogEntry(message="Warning", level=LogLevel.WARN)
+        writer.write(entry)
+
+        assert flush_count == 1
+        writer.close()
+
+    def test_signal_manager_registration(self):
+        """Test automatic registration with SignalManager."""
+        class MockWriter:
+            def write(self, entry):
+                pass
+
+            def flush(self):
+                pass
+
+        mock = MockWriter()
+        writer = CriticalWriter(mock, enable_signal_handlers=True)
+
+        assert SignalManager.get_registered_count() == 1
+
+        writer.close()
+        assert SignalManager.get_registered_count() == 0
+
+    def test_emergency_flush(self):
+        """Test emergency flush method."""
+        flush_count = 0
+
+        class MockWriter:
+            def write(self, entry):
+                pass
+
+            def flush(self):
+                nonlocal flush_count
+                flush_count += 1
+
+        mock = MockWriter()
+        writer = CriticalWriter(mock, enable_signal_handlers=False)
+
+        writer.emergency_flush()
+
+        assert flush_count == 1
+        writer.close()
+
+    def test_context_manager(self):
+        """Test context manager usage."""
+        closed = False
+
+        class MockWriter:
+            def write(self, entry):
+                pass
+
+            def flush(self):
+                pass
+
+            def close(self):
+                nonlocal closed
+                closed = True
+
+        mock = MockWriter()
+        with CriticalWriter(mock, enable_signal_handlers=False) as writer:
+            entry = LogEntry(message="Test", level=LogLevel.INFO)
+            writer.write(entry)
+
+        assert closed
+
+    def test_sync_to_disk_with_file_writer(self):
+        """Test disk sync with actual file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = os.path.join(tmpdir, "test.log")
+
+            from logger_module.writers.file_writer import FileWriter
+            file_writer = FileWriter(file_path)
+            writer = CriticalWriter(
+                file_writer,
+                sync_on_critical=True,
+                enable_signal_handlers=False
+            )
+
+            entry = LogEntry(message="Critical error", level=LogLevel.CRITICAL)
+            writer.write(entry)
+            writer.close()
+
+            # Verify file exists and contains content
+            with open(file_path, 'r') as f:
+                content = f.read()
+                assert "Critical error" in content
+
+
+class TestWALCriticalWriter:
+    """Test WALCriticalWriter functionality."""
+
+    def setup_method(self):
+        """Reset signal manager before each test."""
+        SignalManager.reset()
+
+    def teardown_method(self):
+        """Reset signal manager after each test."""
+        SignalManager.reset()
+
+    def test_write_to_wal(self):
+        """Test writing to WAL file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wal_path = os.path.join(tmpdir, "test.wal")
+
+            class MockWriter:
+                def write(self, entry):
+                    pass
+
+                def flush(self):
+                    pass
+
+            mock = MockWriter()
+            writer = WALCriticalWriter(
+                mock,
+                wal_path=wal_path,
+                enable_signal_handlers=False
+            )
+
+            entry = LogEntry(message="Test message", level=LogLevel.INFO)
+            writer.write(entry)
+            writer.close()
+
+            # Verify WAL file exists
+            assert os.path.exists(wal_path)
+
+    def test_wal_recovery(self):
+        """Test recovering uncommitted entries from WAL."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wal_path = os.path.join(tmpdir, "test.wal")
+
+            class FailingWriter:
+                def write(self, entry):
+                    raise RuntimeError("Simulated failure")
+
+                def flush(self):
+                    pass
+
+            mock = FailingWriter()
+            writer = WALCriticalWriter(
+                mock,
+                wal_path=wal_path,
+                auto_cleanup=False,
+                enable_signal_handlers=False
+            )
+
+            entry = LogEntry(message="Should be recovered", level=LogLevel.ERROR)
+            try:
+                writer.write(entry)
+            except RuntimeError:
+                pass
+
+            writer._wal_file.close()
+
+            # Create new writer to recover
+            class MockWriter2:
+                def write(self, entry):
+                    pass
+
+                def flush(self):
+                    pass
+
+            mock2 = MockWriter2()
+            writer2 = WALCriticalWriter(
+                mock2,
+                wal_path=wal_path,
+                auto_cleanup=False,
+                enable_signal_handlers=False
+            )
+
+            recovered = writer2.recover()
+            assert len(recovered) >= 1
+
+            writer2.close()
+
+    def test_wal_commit_marker(self):
+        """Test that committed entries are marked."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wal_path = os.path.join(tmpdir, "test.wal")
+
+            written = []
+
+            class MockWriter:
+                def write(self, entry):
+                    written.append(entry)
+
+                def flush(self):
+                    pass
+
+            mock = MockWriter()
+            writer = WALCriticalWriter(
+                mock,
+                wal_path=wal_path,
+                auto_cleanup=False,
+                enable_signal_handlers=False
+            )
+
+            entry = LogEntry(message="Committed entry", level=LogLevel.INFO)
+            writer.write(entry)
+            writer.close()
+
+            # Create new writer to check recovery
+            mock2 = MockWriter()
+            writer2 = WALCriticalWriter(
+                mock2,
+                wal_path=wal_path,
+                auto_cleanup=False,
+                enable_signal_handlers=False
+            )
+
+            # Should find no uncommitted entries
+            recovered = writer2.recover()
+            assert len(recovered) == 0
+
+            writer2.close()
+
+    def test_clear_wal(self):
+        """Test clearing WAL file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wal_path = os.path.join(tmpdir, "test.wal")
+
+            class MockWriter:
+                def write(self, entry):
+                    pass
+
+                def flush(self):
+                    pass
+
+            mock = MockWriter()
+            writer = WALCriticalWriter(
+                mock,
+                wal_path=wal_path,
+                enable_signal_handlers=False
+            )
+
+            entry = LogEntry(message="Test", level=LogLevel.INFO)
+            writer.write(entry)
+
+            writer.clear_wal()
+
+            # After clear, WAL should be empty or contain no entries
+            with open(wal_path, 'r') as f:
+                content = f.read()
+                assert content == ""
+
+            writer.close()
+
+    def test_builder_integration(self):
+        """Test CriticalWriter with LoggerBuilder."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_path = os.path.join(tmpdir, "test.log")
+
+            SignalManager.reset()
+
+            logger = (LoggerBuilder()
+                .with_name("test")
+                .with_async(False)
+                .with_file(log_path)
+                .with_critical_writer(
+                    enabled=True,
+                    force_flush_levels={LogLevel.ERROR, LogLevel.CRITICAL}
+                )
+                .build())
+
+            logger.error("Error message")
+            logger.shutdown()
+
+            with open(log_path, 'r') as f:
+                content = f.read()
+                assert "Error message" in content
+
+    def test_builder_with_wal(self):
+        """Test WALCriticalWriter with LoggerBuilder."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_path = os.path.join(tmpdir, "test.log")
+            wal_path = os.path.join(tmpdir, "test.wal")
+
+            SignalManager.reset()
+
+            logger = (LoggerBuilder()
+                .with_name("test")
+                .with_async(False)
+                .with_file(log_path)
+                .with_critical_writer(
+                    enabled=True,
+                    wal_path=wal_path
+                )
+                .build())
+
+            logger.critical("Critical message")
+            logger.shutdown()
+
+            # Verify both log and WAL exist
+            assert os.path.exists(log_path)
+            assert os.path.exists(wal_path)
+
+            with open(log_path, 'r') as f:
+                content = f.read()
+                assert "Critical message" in content
