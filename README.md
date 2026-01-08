@@ -150,6 +150,66 @@ stats = recover_all("/tmp", output_file="recovered.log", cleanup=True)
 print(f"Recovered {stats['total_entries']} entries")
 ```
 
+### Critical Writer
+
+Ensure critical logs (ERROR, CRITICAL) are never lost, even during crashes:
+
+```python
+from logger_module import LoggerBuilder, LogLevel
+from logger_module.safety import CriticalWriter
+from logger_module.writers import FileWriter
+
+# Using LoggerBuilder (recommended)
+logger = (LoggerBuilder()
+    .with_name("myapp")
+    .with_file("app.log")
+    .with_critical_writer(
+        enabled=True,
+        force_flush_levels={LogLevel.ERROR, LogLevel.CRITICAL},
+        sync_on_critical=True
+    )
+    .build())
+
+logger.error("This is immediately flushed and synced to disk")
+logger.shutdown()
+```
+
+With Write-Ahead Logging (WAL) for crash recovery:
+
+```python
+from logger_module import LoggerBuilder
+
+# Enable WAL for crash recovery
+logger = (LoggerBuilder()
+    .with_name("myapp")
+    .with_file("app.log")
+    .with_critical_writer(
+        enabled=True,
+        wal_path="/tmp/app.wal"
+    )
+    .build())
+
+logger.critical("Critical error - recoverable from WAL on crash")
+logger.shutdown()
+```
+
+Recover uncommitted entries after crash:
+
+```python
+from logger_module.safety import WALCriticalWriter
+from logger_module.writers import FileWriter
+
+writer = FileWriter("app.log")
+wal_writer = WALCriticalWriter(writer, wal_path="/tmp/app.wal")
+
+# Recover any uncommitted entries
+recovered = wal_writer.recover()
+for entry in recovered:
+    print(f"Recovered: {entry.message}")
+
+wal_writer.close()
+```
+
 ### Encrypted Logging
 
 Encrypt log files for compliance (GDPR, HIPAA, PCI DSS):
@@ -230,6 +290,8 @@ python_logger_system/
 │   │   ├── signal_manager.py   # Signal handlers
 │   │   ├── mmap_buffer.py      # Memory-mapped buffer
 │   │   ├── crash_safe_mixin.py # Crash-safe mixin
+│   │   ├── critical_writer.py  # Critical log protection
+│   │   ├── wal_critical_writer.py # WAL-based crash recovery
 │   │   └── recovery.py         # Log recovery utilities
 │   └── security/
 │       ├── encrypted_writer.py # Encryption writer
